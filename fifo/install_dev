@@ -1,0 +1,16 @@
+#!/bin/sh
+rm -f /dev/fifo0
+rm -f /dev/fifo1
+# Major Nummer ermitteln
+major=$(awk '$2=="fifo" {print $1}' /proc/devices)
+if [ "$major" = "" ]; then
+   echo major not defined # Major nicht gefunden
+else
+   # Einträge im /dev-Verzeichnis erzeugen
+   mknod /dev/fifo0 c $major 7                                
+   mknod /dev/fifo1 c $major 8
+                 
+   # Schreib/Lesezugriff freigeben
+   chmod go+rw /dev/fifo0
+   chmod go+rw /dev/fifo1
+fi
