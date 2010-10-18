@@ -9,6 +9,8 @@ MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Nerdbuero Staff");
 
 #define NUM_MINORS 2
+#define TRUE 0
+#define FALSE 1
 
 static dev_t dev;
 static struct cdev char_dev;
@@ -17,11 +19,12 @@ static struct cdev char_dev;
 struct fifo
 {
 	int rcnt, wcnt;
+	char lockdown;
 	char buffer[FIFOSIZE];
 };
 
-static struct fifo fifo0 = {0, 0};
-static struct fifo fifo1 = {0, 0};
+static struct fifo fifo0 = {0, 0, FALSE};
+static struct fifo fifo1 = {0, 0, FALSE};
 
 static int fifo_io_open(struct inode* inodep, struct file* filep)
 {
@@ -67,22 +70,59 @@ static ssize_t fifo_io_read(struct file* filep, char __user *data,
 		bytes = copy_to_user(data, &(fifo0.buffer[fifo0.rcnt]), FIFOSIZE - fifo0.rcnt);
 		if(bytes > 0) {
 			fifo0.rcnt += bytes;
-			return bytes;
 		} else {
 			bytes = FIFOSIZE - fifo0.rcnt;
+			fifo0.rcnt = 0;
+			bytes += fifo_io_read(filep, data + bytes, to_read - bytes, pOffset);
 		}
-		fifo0.rcnt = 0;
-		bytes += fifo_io_read(filep, data + bytes, to_read - bytes, pOffset);
 	}
 	
+	// FIFO entsperren, sofern es gesperrt war und nun mind. 1 byte 
+	// gelesen wurde
+	if(fifo0.lockdown == TRUE && bytes > 0) {
+		fifo0.lockdown = FALSE;
+	}
 	return bytes;
 }
 
-static ssize_t fifo_io_write(struct file* filep, const char __user *pDaten,
+static ssize_t fifo_io_write(struct file* filep, const char __user *data,
 								size_t count, loff_t *pOffset)
 {
 	printk("FIFO write called\n");
-	return 0;
+	
+	int returnvalue = 0;
+	
+	// __________	rcnt=0	wcnt=0	diff=0 -> Sonderfall
+	// +++_______	rcnt=0	wcnt=3 	diff=-3
+	// ++_____+++	rcnt=8	wcnt=2	diff=6
+	
+	int freespace = fifo0.rcnt - fifo0.wcnt;
+	if(freespace == 0 && fifo0.lockdown == TRUE) {
+		return -EINVAL;
+	} else if(freespace < 0) {
+		freespace += FIFOSIZE;
+	}
+	
+	freespace = freespace < count ? freespace : count;
+	
+	if ((fifo0.wcnt + freespace) < FIFOSIZE)
+	{	// fifo0.buffer +fifo0.wcnt
+		int unwrittenBytes = copy_from_user(&(fifo0.buffer[fifo0.wcnt]), data, freespace);
+		
+		returnvalue = count - unwrittenBytes;
+		fifo0.wcnt = fifo0.wcnt + returnvalue;
+	}
+	
+	else
+	{
+		returnvalue = -EINVAL;
+	}
+	
+	if(fifo0.rcnt == fifo0.wcnt) {
+		fifo0.lockdown = TRUE;
+	}
+	
+	return returnvalue;
 }
 
 struct file_operations fops =
@@ -94,7 +134,7 @@ struct file_operations fops =
    .write	= fifo_io_write
 };
 
-static int fifo_init(void)
+static int __init fifo_init(void)
 {
 	int ret;
 	printk("FIFO module loaded\n");
@@ -118,7 +158,7 @@ static int fifo_init(void)
 	return 0;
 }
 
-static void fifo_exit(void)
+static void __exit fifo_exit(void)
 {
 	printk("FIFO module unloaded\n");
 	
