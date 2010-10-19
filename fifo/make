@@ -1,3 +1,3 @@
 #!/bin/bash
-KERNELSOURCE=~/linux-`uname -r`/
+KERNELSOURCE=/usr/src/linux-headers-`uname -r`/
 make -C $KERNELSOURCE SUBDIRS=$PWD $1

@@ -92,15 +92,93 @@ static ssize_t fifo_io_write(struct file* filep, const char __user *data,
 	
 	int returnvalue = 0;
 	
+	// Fälle: wi steht für den Schreibindex an der Stelle i; ri für den Leseindex an Stelle i
+	
+	// I  
+	// wi == ri  
+	// In diesem Fall darf nur geschrieben werden, wenn der Buffer nicht voll ist. 
+	// Wird durch Variable fifo[0-1].lockdown festgehalten
+	
+	// II  
+	// ri < wi 
+	// Schreibindex steht vor dem Leseindex.... In diesem Fall darf bis zum letzten < ri geschrieben werden.
+	
+	
+	// III 
+	// ri > wi 
+	// Auch hier darf bis zum letzten < ri geschrieben werden
+	
+	
+	
+	int totalBytesToWrite = fifo0.rcnt - fifo0.wcnt;
+	
+	if (totalBytesToWrite < 0)
+	{
+		totalBytesToWrite = FIFOSIZE - totalBytesToWrite; 
+	}
+	
+	
+	
+
+	if (fifo0.wcnt > fifo0.rcnt && fifo0.lockdown == FALSE)
+	{
+		
+		
+		if ((fifo0.wcnt + totalBytesToWrite) <= FIFOSIZE)
+		{ 
+			copy_from_user(&(fifo0.buffer[fifo0.wcnt]), data, totalBytesToWrite);
+		}
+		else 
+		{
+			int rechterRand = FIFOSIZE - fifo0.wcnt;
+			copy_from_user(&(fifo0.buffer[fifo0.wcnt]), data, rechterRand);
+			int linkerRand = totalBytesToWrite - rechterRand;
+			copy_from_user(&(fifo0.buffer[0]), data+rechterRand,linkerRand);
+		}
+	}
+	else if (fifo0.rcnt > fifo0.wcnt &&  fifo0.lockdown == false)
+	{
+		totalBytesToWrite = totalBytesToWrite > count ? count : totalBytesToWrite;	
+		copy_from_user(&(fifo0.buffer[fifo0.wcnt]), data, totalBytesToWrite);
+		
+	}
+	
+	else if (fifo0.rcnt == fifo0.wcnt && fifo0.lockdown == FALSE)
+	{
+		if ((fifo0.wcnt + totalBytesToWrite) <= FIFOSIZE)
+		{
+			copy_from_user(&(fifo0.buffer[fifo0.wcnt]), data, totalBytesToWrite);
+		}
+		else 
+		{
+			int rechterRand = FIFOSIZE - fifo0.wcnt;
+			copy_from_user(&(fifo0.buffer[fifo0.wcnt]), data, rechterRand);
+			int linkerRand = totalBytesToWrite - rechterRand;
+			copy_from_user(&(fifo0.buffer[0]), data+rechterRand,linkerRand);
+		}
+	}
+	return totalBytesToWrite;
+}
+		
+	
+	
+	
+	/**
+	
+	
 	// __________	rcnt=0	wcnt=0	diff=0 -> Sonderfall
 	// +++_______	rcnt=0	wcnt=3 	diff=-3
 	// ++_____+++	rcnt=8	wcnt=2	diff=6
 	
 	int freespace = fifo0.rcnt - fifo0.wcnt;
-	if(freespace == 0 && fifo0.lockdown == TRUE) {
+	if(fifo0.rcnt == fifo0.wcnt && fifo0.lockdown == TRUE) 
+	{
 		return -EINVAL;
-	} else if(freespace < 0) {
-		freespace += FIFOSIZE;
+	} 
+	else if(fifo0.rcnt == fifo0.wcnt && fifo0.lockdown == FALSE) 
+	{
+		
+		copy_from_user(&(fifo0.buffer[fifo0.wcnt]), data, freespace);
 	}
 	
 	freespace = freespace < count ? freespace : count;
@@ -124,6 +202,8 @@ static ssize_t fifo_io_write(struct file* filep, const char __user *data,
 	
 	return returnvalue;
 }
+* 
+* */
 
 struct file_operations fops =
 {
