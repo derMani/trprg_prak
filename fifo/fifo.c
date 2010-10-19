@@ -25,8 +25,7 @@ struct fifo
 	char buffer[FIFOSIZE];
 };
 
-static struct fifo fifo0 = {0, 0, FALSE};
-static struct fifo fifo1 = {0, 0, FALSE};
+static struct fifo fifos[2] = {{0, 0, FALSE}, {0, 0, FALSE}};
 
 static int level[NUM_MINORS] = {0, 0};
 static int levelLen = NUM_MINORS;
@@ -48,14 +47,16 @@ static int fifo_io_close(struct inode* inodep, struct file* filep)
 static ssize_t fifo_io_read(struct file* filep, char __user *data,
 							size_t count, loff_t *pOffset)
 {
+	printk("FIFO read called\n");
+	
+	struct fifo* fifo = &(fifos[iminor(filep->f_dentry->d_inode) - 7]);
 	int bytes = 0;
 	int to_read = 0;
-	printk("FIFO read called\n");
 	
 	// +++____+++	wcnt=3	rcnt=7	diff=-4
 	// __________	wcnt=0	rcnt=0	diff=0
 	// +++++_____	wcnt=5	rcnt=0	diff=5
-	to_read = fifo0.wcnt - fifo0.rcnt;
+	to_read = fifo->wcnt - fifo->rcnt;
 	if(to_read == 0) {
 		return 0;
 	} else if(to_read < 0) {
@@ -66,28 +67,28 @@ static ssize_t fifo_io_read(struct file* filep, char __user *data,
 	to_read = to_read < count ? to_read : count;
 	
 	// Copy the bytes from kernelspace to userspace
-	if(fifo0.wcnt > fifo0.rcnt) {
-		bytes = copy_to_user(data, &(fifo0.buffer[fifo0.rcnt]), to_read);
+	if(fifo->wcnt > fifo->rcnt) {
+		bytes = copy_to_user(data, &(fifo->buffer[fifo->rcnt]), to_read);
 		if(bytes == 0) {
 			bytes = to_read;
 		}
-		fifo0.rcnt += bytes;
+		fifo->rcnt += bytes;
 	} else {
 		// Copy right chunk
-		bytes = copy_to_user(data, &(fifo0.buffer[fifo0.rcnt]), FIFOSIZE - fifo0.rcnt);
+		bytes = copy_to_user(data, &(fifo->buffer[fifo->rcnt]), FIFOSIZE - fifo->rcnt);
 		if(bytes > 0) {
-			fifo0.rcnt += bytes;
+			fifo->rcnt += bytes;
 		} else {
-			bytes = FIFOSIZE - fifo0.rcnt;
-			fifo0.rcnt = 0;
+			bytes = FIFOSIZE - fifo->rcnt;
+			fifo->rcnt = 0;
 			bytes += fifo_io_read(filep, data + bytes, to_read - bytes, pOffset);
 		}
 	}
 	
 	// FIFO entsperren, sofern es gesperrt war und nun mind. 1 byte 
 	// gelesen wurde
-	if(fifo0.lockdown == TRUE && bytes > 0) {
-		fifo0.lockdown = FALSE;
+	if(fifo->lockdown == TRUE && bytes > 0) {
+		fifo->lockdown = FALSE;
 	}
 	return bytes;
 }
