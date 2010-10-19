@@ -2,15 +2,17 @@
 #include <linux/fs.h>
 #include <linux/init.h>
 #include <linux/module.h>
+#include <linux/moduleparam.h>
 #include <linux/kernel.h>
+#include <linux/stat.h>
 #include <asm/uaccess.h>
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Nerdbuero Staff");
 
 #define NUM_MINORS 2
-#define TRUE 0
-#define FALSE 1
+#define TRUE 1
+#define FALSE 0
 
 static dev_t dev;
 static struct cdev char_dev;
@@ -25,6 +27,11 @@ struct fifo
 
 static struct fifo fifo0 = {0, 0, FALSE};
 static struct fifo fifo1 = {0, 0, FALSE};
+
+static int level[NUM_MINORS] = {0, 0};
+static int levelLen = NUM_MINORS;
+module_param_array(level, int, &levelLen, S_IRUGO);
+MODULE_PARM_DESC(level, "Fill level");
 
 static int fifo_io_open(struct inode* inodep, struct file* filep)
 {
@@ -122,6 +129,7 @@ static ssize_t fifo_io_write(struct file* filep, const char __user *data,
 		fifo0.lockdown = TRUE;
 	}
 	
+	level[0] += returnvalue;
 	return returnvalue;
 }
 
