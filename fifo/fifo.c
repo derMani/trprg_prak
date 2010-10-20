@@ -17,7 +17,7 @@ MODULE_AUTHOR("Nerdbuero Staff");
 static dev_t dev;
 static struct cdev char_dev;
 
-#define FIFOSIZE 200
+#define FIFOSIZE 8
 struct fifo
 {
 	int rcnt, wcnt;
@@ -31,6 +31,18 @@ static int level[NUM_MINORS] = {0, 0};
 static int levelLen = NUM_MINORS;
 module_param_array(level, int, &levelLen, S_IRUGO);
 MODULE_PARM_DESC(level, "Fill level");
+
+void finalizeWrite()
+{
+	if (fifo0.wcnt >= FIFOSIZE)
+	{
+		fifo0.wcnt = 0;
+	}
+	if(fifo0.rcnt == fifo0.wcnt) 
+	{
+		fifo0.lockdown = TRUE;
+	}
+}
 
 static int fifo_io_open(struct inode* inodep, struct file* filep)
 {
@@ -61,10 +73,18 @@ static ssize_t fifo_io_read(struct file* filep, char __user *data,
 		return 0;
 	} else if(to_read < 0) {
 		to_read += FIFOSIZE;
+/*
+	to_read = fifo0.wcnt - fifo0.rcnt;
+	if(to_read <= 0) 
+	{
+		to_read = FIFOSIZE - to_read;
+>>>>>>> aa070c7b8e6aec11d58f9254b1d6c4cf6a7f6a92
+	*/
 	}
 	
 	// Check if we have enough bytes to fullfill the request
 	to_read = to_read < count ? to_read : count;
+	printk("%i",to_read);
 	
 	// Copy the bytes from kernelspace to userspace
 	if(fifo->wcnt > fifo->rcnt) {
@@ -97,41 +117,100 @@ static ssize_t fifo_io_write(struct file* filep, const char __user *data,
 								size_t count, loff_t *pOffset)
 {
 	printk("FIFO write called\n");
+	struct fifo* fifo = &(fifos[iminor(filep->f_dentry->d_inode) - 7]);
 	
-	int returnvalue = 0;
+	// Fälle: wi steht für den Schreibindex an der Stelle i; ri für den Leseindex an Stelle i
 	
-	// __________	rcnt=0	wcnt=0	diff=0 -> Sonderfall
-	// +++_______	rcnt=0	wcnt=3 	diff=-3
-	// ++_____+++	rcnt=8	wcnt=2	diff=6
+	// I  
+	// wi == ri  
+	// In diesem Fall darf nur geschrieben werden, wenn der Buffer nicht voll ist. 
+	// Wird durch Variable fifo[0-1].lockdown festgehalten
 	
-	int freespace = fifo0.rcnt - fifo0.wcnt;
-	if(freespace == 0 && fifo0.lockdown == TRUE) {
-		return -EINVAL;
-	} else if(freespace < 0) {
-		freespace += FIFOSIZE;
-	}
+	// II  
+	// ri < wi 
+	// Schreibindex steht vor dem Leseindex.... In diesem Fall darf bis zum letzten < ri geschrieben werden.
 	
-	freespace = freespace < count ? freespace : count;
 	
-	if ((fifo0.wcnt + freespace) < FIFOSIZE)
-	{	// fifo0.buffer +fifo0.wcnt
-		int unwrittenBytes = copy_from_user(&(fifo0.buffer[fifo0.wcnt]), data, freespace);
-		
-		returnvalue = count - unwrittenBytes;
-		fifo0.wcnt = fifo0.wcnt + returnvalue;
-	}
+	// III 
+	// ri > wi 
+	// Auch hier darf bis zum letzten < ri geschrieben werden
 	
-	else
+	
+	if (fifo0.lockdown == TRUE)
 	{
-		returnvalue = -EINVAL;
+		return -EINVAL;
 	}
 	
-	if(fifo0.rcnt == fifo0.wcnt) {
-		fifo0.lockdown = TRUE;
+	int totalBytesToWrite = fifo0.rcnt - fifo0.wcnt;
+	
+	int returnValue = 0;
+
+	if (totalBytesToWrite <= 0)
+	{
+		totalBytesToWrite = FIFOSIZE + totalBytesToWrite; 
 	}
 	
+	totalBytesToWrite = totalBytesToWrite < count ? totalBytesToWrite : count;
+	
+
+	if (fifo0.wcnt > fifo0.rcnt && fifo0.lockdown == FALSE)
+	{
+		
+		if ((fifo0.wcnt + totalBytesToWrite) <= FIFOSIZE)
+		{ 
+			int n = copy_from_user(&(fifo0.buffer[fifo0.wcnt]), data, totalBytesToWrite);
+
+			returnValue = count - n;
+			fifo0.wcnt += returnValue;
+			finalizeWrite();
+		}
+		else 
+		{
+			int rechterRand = FIFOSIZE - fifo0.wcnt;
+			int n = copy_from_user(&(fifo0.buffer[fifo0.wcnt]), data, rechterRand);
+			int linkerRand = totalBytesToWrite - rechterRand;
+			n += copy_from_user(&(fifo0.buffer[0]), data+rechterRand,linkerRand);
+			
+			returnValue = count - n;
+			fifo0.wcnt += returnValue;
+			finalizeWrite();
+			
+		}
+	}
+	else if (fifo0.rcnt > fifo0.wcnt &&  fifo0.lockdown == false)
+	{
+		int n = copy_from_user(&(fifo0.buffer[fifo0.wcnt]), data, totalBytesToWrite);
+		returnValue = count - n;
+		fifo0.wcnt += returnValue;
+		finalizeWrite();
+		
+	}
+	else if (fifo0.rcnt == fifo0.wcnt && fifo0.lockdown == FALSE)
+	{
+		if ((fifo0.wcnt + totalBytesToWrite) <= FIFOSIZE)
+		{
+			printk("%i",count);
+			int n = copy_from_user(&(fifo0.buffer[fifo0.wcnt]), data, totalBytesToWrite);
+			returnValue = count -n;
+			fifo0.wcnt += returnValue;
+			finalizeWrite();
+		}
+		else 
+		{
+			int rechterRand = FIFOSIZE - fifo0.wcnt;
+			int n = copy_from_user(&(fifo0.buffer[fifo0.wcnt]), data, rechterRand);
+			int linkerRand = totalBytesToWrite - rechterRand;
+			n+= copy_from_user(&(fifo0.buffer[0]), data+rechterRand,linkerRand);
+			returnValue = n;
+			
+			fifo0.wcnt += returnValue;
+			finalizeWrite();
+			
+		}
+	}
+
 	level[0] += returnvalue;
-	return returnvalue;
+	return returnValue;
 }
 
 struct file_operations fops =
