@@ -115,11 +115,11 @@ rlock:
 	{
 		int rcnt = atomic_read(&(fifo->rcnt));
 		int wcnt = atomic_read(&(fifo->wcnt));
-		int new_rcnt;
-		/*if(to_read <= 0)
+		int new_rcnt = 0;
+		if(to_read <= 0)
 		{
 			to_read += FIFOSIZE;
-		}*/
+		}
 
 		// Check if we have enough bytes to fullfill the request
 		to_read = to_read < count ? to_read : count;
@@ -233,6 +233,8 @@ wlock:
 		// Release the lock
 		up(&(fifo->lock));
 		
+		
+		printk("Write-Methode: Schlaf Data, Schlaf!");
 		// And go to sleep
 		if((s = wait_event_interruptible(fifo->write_queue, atomic_read(&(fifo->level)) < FIFOSIZE)) != 0)
 		{
@@ -256,11 +258,11 @@ wlock:
 		int totalBytesToWrite = atomic_read(&(fifo->level)); //fifo->rcnt - fifo->wcnt;
 		int rcnt = atomic_read(&(fifo->rcnt));
 		int wcnt = atomic_read(&(fifo->wcnt));
-		int new_wcnt;
-		/*if (totalBytesToWrite <= 0)
+		int new_wcnt = 0;
+		if (totalBytesToWrite <= 0)
 		{
 			totalBytesToWrite = FIFOSIZE + totalBytesToWrite; 
-		}*/
+	    }
 
 		totalBytesToWrite = totalBytesToWrite < count ? totalBytesToWrite : count;
 		printk("%i\n", totalBytesToWrite);
@@ -365,7 +367,14 @@ static int __init fifo_init(void)
 	// Initialize fifo structs (queues, semaphores, ...)
 	for(n = 0; n < NUM_MINORS; n++)
 	{
+		
 		sema_init(&(fifos[n].lock), 1);
+        init_waitqueue_head(&(fifos[n].read_queue));     
+        init_waitqueue_head(&(fifos[n].write_queue));
+        atomic_set(&(fifos->rcnt), 0);
+        atomic_set(&(fifos->wcnt), 0);
+        atomic_set(&(fifos->level), 0);
+        
 	}
 
 	return 0;

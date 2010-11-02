@@ -10,15 +10,17 @@ int main(int argc, char *argv[])
 	}	
 	fclose(f);
 	
+	printf("Bis EOF lesen\n");
 	f = fopen("/dev/fifo0", "rb");
-	int ch = fgetc(f);
-	while(ch != EOF) {
+	
+	for(int i = 0; i < 10; i++) {
+		int ch = fgetc(f);
 		printf("%c", ch);
-		ch = fgetc(f);
+		
 	}
 	printf(" gelesen\n");
 	fclose(f);
-	
+	/*
 	f = fopen("/dev/fifo0", "wb");
 	for(int n = 0; n < 4; n++) {
 		fputc('1' + n, f);
@@ -45,5 +47,5 @@ int main(int argc, char *argv[])
 		ch = fgetc(f);
 	}
 	printf(" gelesen\n");
-	fclose(f);
+	fclose(f);*/
 }

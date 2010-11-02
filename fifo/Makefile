@@ -14,5 +14,10 @@ default:
 	$(MAKE) -C $(KDIR) SUBDIRS=$(PWD) modules
 clean:
 	rm *.o *.ko
+
+
+test:
+	rm test -f
+	gcc -o test test.c --std=c99
 endif
 
