@@ -55,7 +55,7 @@ static int lockFifo(struct semaphore* sema, struct file* filep)
 {
 	if((filep->f_flags & O_NONBLOCK) != 0) // NON BLOCKING
 	{
-		if(down_trylock(sema) != 0)
+		if(down_trylock(sema) != 0) //down_trylock : Returns 0 if the mutex has been acquired successfully or 1 if it it cannot be acquired.
 		{
 			// Someone else has it
 			return -EAGAIN;
@@ -92,11 +92,11 @@ rlock:
 	// Check if there is something to read
 	if(atomic_read(&(fifo->level)) == 0)
 	{
-		// Release the lock
+		// Release the lock to wait for somebody to write something into the fifo 
 		up(&(fifo->lock));
 		
 		// And go to sleep
-		if((s = wait_event_interruptible(fifo->read_queue, atomic_read(&(fifo->level)) > 0)) != 0)
+		if((s = wait_event_interruptible(fifo->read_queue, atomic_read(&(fifo->level)) > 0)) != 0) // interruptible weil killbar sein wollen
 		{
 			return -ERESTARTSYS; // Signal
 		}
@@ -176,7 +176,7 @@ rlock:
 		// gelesen wurde
 		ret = to_read - unreadBytes;
 		/*if(ret > 0)
-		{
+		{new_rcnt
 			fifo->lockdown = FALSE;
 		}*/
 		level[fifoIdx] -= ret;
