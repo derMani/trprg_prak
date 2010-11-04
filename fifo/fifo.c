@@ -19,11 +19,11 @@ MODULE_AUTHOR("Nerdbuero Staff");
 static dev_t dev;
 static struct cdev char_dev;
 
-#define FIFOSIZE 8
+#define FIFOSIZE 11
 struct fifo
 {
-	atomic_t rcnt;
-	atomic_t wcnt;
+	int rcnt;
+	int wcnt;
 	atomic_t level;
 	struct semaphore lock;
 	wait_queue_head_t read_queue;
@@ -113,13 +113,13 @@ rlock:
 	}
 	else*/
 	{
-		int rcnt = atomic_read(&(fifo->rcnt));
+		/*int rcnt = atomic_read(&(fifo->rcnt));
 		int wcnt = atomic_read(&(fifo->wcnt));
-		int new_rcnt = 0;
-		if(to_read <= 0)
+		int new_rcnt = rcnt;*/
+		/*if(to_read <= 0)
 		{
 			to_read += FIFOSIZE;
-		}
+		}*/
 
 		// Check if we have enough bytes to fullfill the request
 		to_read = to_read < count ? to_read : count;
@@ -130,48 +130,48 @@ rlock:
 		
 		int unreadBytes = 0;
 		// ++++____
-		if(wcnt > rcnt)
+		if(fifo->wcnt > fifo->rcnt)
 		{
-			unreadBytes = copy_to_user(data, &(fifo->buffer[rcnt]), to_read);
-			new_rcnt = (rcnt + to_read - unreadBytes) % FIFOSIZE;
+			unreadBytes = copy_to_user(data, &(fifo->buffer[fifo->rcnt]), to_read);
+			fifo->rcnt = (fifo->rcnt + to_read - unreadBytes) % FIFOSIZE;
 		// ++__++++
 		}
-		else if(wcnt < rcnt)
+		else if(fifo->wcnt < fifo->rcnt)
 		{
-			if(rcnt + to_read < FIFOSIZE)
+			if(fifo->rcnt + to_read < FIFOSIZE)
 			{
-				unreadBytes = copy_to_user(data, &(fifo->buffer[rcnt]), to_read);
-				new_rcnt = (rcnt + to_read - unreadBytes) % FIFOSIZE;
+				unreadBytes = copy_to_user(data, &(fifo->buffer[fifo->rcnt]), to_read);
+				fifo->rcnt = (fifo->rcnt + to_read - unreadBytes) % FIFOSIZE;
 			}
 			else
 			{
-				int rechterRand = FIFOSIZE - rcnt;
+				int rechterRand = FIFOSIZE - fifo->rcnt;
 				// Rechter Rand
-				unreadBytes = copy_to_user(data, &(fifo->buffer[rcnt]), rechterRand);
-				new_rcnt = (rcnt + rechterRand - unreadBytes) % FIFOSIZE;
+				unreadBytes = copy_to_user(data, &(fifo->buffer[fifo->rcnt]), rechterRand);
+				fifo->rcnt = (fifo->rcnt + rechterRand - unreadBytes) % FIFOSIZE;
 				if(unreadBytes == 0)
 				{
 					// Linken Rand
 					unreadBytes = copy_to_user(data + rechterRand, &(fifo->buffer[0]), to_read - rechterRand);
-					new_rcnt = (new_rcnt + to_read - rechterRand) % FIFOSIZE;
+					fifo->rcnt = (fifo->rcnt + to_read - rechterRand) % FIFOSIZE;
 				}
 			}
 		}
-		else if(rcnt == wcnt) //fifo->lockdown == TRUE)
+		else if(fifo->rcnt == fifo->wcnt) //fifo->lockdown == TRUE)
 		{
-			int rechterRand = FIFOSIZE - rcnt;
+			int rechterRand = FIFOSIZE - fifo->rcnt;
 			// Rechter Rand
-			unreadBytes = copy_to_user(data, &(fifo->buffer[rcnt]), rechterRand);
-			new_rcnt = (rcnt + rechterRand - unreadBytes) % FIFOSIZE;
+			unreadBytes = copy_to_user(data, &(fifo->buffer[fifo->rcnt]), rechterRand);
+			fifo->rcnt = (fifo->rcnt + rechterRand - unreadBytes) % FIFOSIZE;
 			if(unreadBytes == 0)
 			{
 				// Linken Rand
 				unreadBytes = copy_to_user(data + to_read - rechterRand, &(fifo->buffer[0]), to_read - rechterRand);
-				new_rcnt = (new_rcnt + to_read - rechterRand) % FIFOSIZE;
+				fifo->rcnt = (fifo->rcnt + to_read - rechterRand) % FIFOSIZE;
 			}
 		}
 
-		printk("read: cnt %i\n", new_rcnt); 
+		printk("read: cnt %i\n", fifo->rcnt); 
 		// FIFO entsperren, sofern es gesperrt war und nun mind. 1 byte 
 		// gelesen wurde
 		ret = to_read - unreadBytes;
@@ -180,16 +180,16 @@ rlock:
 			fifo->lockdown = FALSE;
 		}*/
 		level[fifoIdx] -= ret;
-		atomic_set(&(fifo->rcnt), new_rcnt);
+		//atomic_set(&(fifo->rcnt), new_rcnt);
 		atomic_sub(ret, &(fifo->level));
 		printk("Fuellstand %i\n",  level[fifoIdx]);
 	}
 	
-	// Release semaphore
-	up(&(fifo->lock));
-	
 	// Wake up waiting write processes
 	wake_up_interruptible(&(fifo->write_queue));
+	
+	// Release semaphore
+	up(&(fifo->lock));
 	
 	return ret;
 }
@@ -255,77 +255,78 @@ wlock:
 	}
 	else*/
 	{
-		int totalBytesToWrite = atomic_read(&(fifo->level)); //fifo->rcnt - fifo->wcnt;
-		int rcnt = atomic_read(&(fifo->rcnt));
+		int totalBytesToWrite = FIFOSIZE - atomic_read(&(fifo->level)); //fifo->rcnt - fifo->wcnt;
+		/*int rcnt = atomic_read(&(fifo->rcnt));
 		int wcnt = atomic_read(&(fifo->wcnt));
-		int new_wcnt = 0;
-		if (totalBytesToWrite <= 0)
+		int new_wcnt = wcnt;*/
+		/*if (totalBytesToWrite <= 0)
 		{
 			totalBytesToWrite = FIFOSIZE + totalBytesToWrite; 
-	    }
+	    }*/
 
 		totalBytesToWrite = totalBytesToWrite < count ? totalBytesToWrite : count;
 		printk("%i\n", totalBytesToWrite);
 
-		if (wcnt > rcnt) // && level[fifoIdx] < FIFOSIZE - 1) //fifo->lockdown == FALSE)
+		if (fifo->wcnt > fifo->rcnt) // && level[fifoIdx] < FIFOSIZE - 1) //fifo->lockdown == FALSE)
 		{
-			if ((wcnt + totalBytesToWrite) <= FIFOSIZE)
+			if ((fifo->wcnt + totalBytesToWrite) <= FIFOSIZE)
 			{ 
-				int n = copy_from_user(&(fifo->buffer[wcnt]), data, totalBytesToWrite);
+				int n = copy_from_user(&(fifo->buffer[fifo->wcnt]), data, totalBytesToWrite);
 
 				returnValue = totalBytesToWrite - n;
-				new_wcnt += returnValue;
+				fifo->wcnt += returnValue;
 			}
 			else 
 			{
-				int rechterRand = FIFOSIZE - wcnt;
-				int n = copy_from_user(&(fifo->buffer[wcnt]), data, rechterRand);
+				int rechterRand = FIFOSIZE - fifo->wcnt;
+				int n = copy_from_user(&(fifo->buffer[fifo->wcnt]), data, rechterRand);
 				int linkerRand = totalBytesToWrite - rechterRand;
 				n += copy_from_user(&(fifo->buffer[0]), data+rechterRand,linkerRand);
 
 				returnValue = totalBytesToWrite - n;
-				new_wcnt += returnValue;
+				fifo->wcnt += returnValue;
 			}
 		}
-		else if (rcnt > wcnt) // && level[fifoIdx] < FIFOSIZE - 1) // fifo->lockdown == FALSE)
+		else if (fifo->rcnt > fifo->wcnt) // && level[fifoIdx] < FIFOSIZE - 1) // fifo->lockdown == FALSE)
 		{
-			int n = copy_from_user(&(fifo->buffer[wcnt]), data, totalBytesToWrite);
+			int n = copy_from_user(&(fifo->buffer[fifo->wcnt]), data, totalBytesToWrite);
 			returnValue = totalBytesToWrite - n;
-			new_wcnt += returnValue;
+			fifo->wcnt += returnValue;
 		}
-		else if (rcnt == wcnt) // && level[fifoIdx] < FIFOSIZE - 1) //fifo->lockdown == FALSE)
+		else if (fifo->rcnt == fifo->wcnt) // && level[fifoIdx] < FIFOSIZE - 1) //fifo->lockdown == FALSE)
 		{
-			if ((wcnt + totalBytesToWrite) <= FIFOSIZE)
+			if ((fifo->wcnt + totalBytesToWrite) <= FIFOSIZE)
 			{
 				printk("%i\n", count);
-				int n = copy_from_user(&(fifo->buffer[wcnt]), data, totalBytesToWrite);
+				int n = copy_from_user(&(fifo->buffer[fifo->wcnt]), data, totalBytesToWrite);
 				returnValue = totalBytesToWrite -n;
-				new_wcnt += returnValue;
+				fifo->wcnt += returnValue;
 			}
 			else 
 			{
-				int rechterRand = FIFOSIZE - wcnt;
-				int n = copy_from_user(&(fifo->buffer[wcnt]), data, rechterRand);
+				int rechterRand = FIFOSIZE - fifo->wcnt;
+				int n = copy_from_user(&(fifo->buffer[fifo->wcnt]), data, rechterRand);
 				int linkerRand = totalBytesToWrite - rechterRand;
 				n+= copy_from_user(&(fifo->buffer[0]), data+rechterRand,linkerRand);
 				returnValue = totalBytesToWrite - n;
 
-				new_wcnt += returnValue;
+				fifo->wcnt += returnValue;
 			}
 		}
 
-		new_wcnt = new_wcnt % FIFOSIZE;
-		printk("write: wcnt %i\n", new_wcnt);
+		fifo->wcnt = fifo->wcnt % FIFOSIZE;
+		printk("write: wcnt %i\n", fifo->wcnt);
 		level[fifoIdx] += returnValue;
 		printk("Fuellstand %i\n",  level[fifoIdx]);
-		atomic_set(&(fifo->wcnt), new_wcnt);
+		//atomic_set(&(fifo->wcnt), new_wcnt);
 		atomic_add(returnValue, &(fifo->level));
 	}
-	// Release semaphore
-	up(&(fifos[fifoIdx].lock));
 	
 	// Wake up waiting reading processes
 	wake_up_interruptible(&(fifo->read_queue));
+	
+	// Release semaphore
+	up(&(fifos[fifoIdx].lock));
 	
 	return returnValue;
 }
@@ -371,8 +372,8 @@ static int __init fifo_init(void)
 		sema_init(&(fifos[n].lock), 1);
         init_waitqueue_head(&(fifos[n].read_queue));     
         init_waitqueue_head(&(fifos[n].write_queue));
-        atomic_set(&(fifos->rcnt), 0);
-        atomic_set(&(fifos->wcnt), 0);
+        fifos->rcnt = 0;
+        fifos->wcnt = 0;
         atomic_set(&(fifos->level), 0);
         
 	}
