@@ -15,7 +15,6 @@ default:
 clean:
 	rm *.o *.ko
 
-
 test:
 	rm test -f
 	gcc -o test test.c --std=c99
