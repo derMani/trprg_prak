@@ -11,6 +11,8 @@
 #include <linux/wait.h>
 #include <asm/uaccess.h>
 #include <asm/atomic.h>
+#include <linux/interrupt.h>
+
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Nerdbuero Staff");
@@ -25,6 +27,7 @@ static struct workqueue_struct* workqueue;
 static struct work_struct work;
 static atomic_t working = ATOMIC_INIT(0);
 static struct timer_list copytimer;
+static struct tasklet_struct fifo_tasklet;
 
 struct fifo
 {
@@ -53,7 +56,7 @@ static unsigned long copy(void* dst, const void* src, unsigned long cnt)
 	{
 		((char*)dst)[n] = ((const char*)src)[n];
 	}
-	return cnt;
+	return 0;
 }
 
 static int fifo_io_open(struct inode* inodep, struct file* filep)
@@ -329,6 +332,11 @@ wlock:
 	// Release semaphore
 	up(&(fifos[fifoIdx].lock));
 	
+	if (fifoIdx == 2)
+	{
+		tasklet_schedule(&fifo_tasklet);
+	}
+	
 	return returnValue;
 }
 
@@ -337,7 +345,9 @@ static ssize_t fifo_io_write(struct file* filep, const char __user *data,
 {
 	printk("FIFO write called\n");
 
-	int fifoIdx = iminor(filep->f_dentry->d_inode) - FIRST_MINOR;
+	int fifoIdx = iminor(filep->f_dentry->d_inode) - FIRST_MINOR; // aktuelles fifo 
+	
+	
 	return fifo_write(fifoIdx, data, count, filep->f_flags, copy_from_user);
 }
 
@@ -359,7 +369,7 @@ static void wq_copy(void* data)
 	while(atomic_read(&working) > 0)
 	{
 		// Copy from fifo 0 into buffer
-		if((read = fifo_read(0, buf, FIFOSIZE, 0, copy)) < 0)
+		if((read = fifo_read(0, buf, FIFOSIZE, 0, copy)) < 0) // INS ERSTE FIFO KOPIEREN 
 		{
 			printk("Interrupted");
 			// Error or exit
@@ -374,6 +384,24 @@ static void wq_copy(void* data)
 		}
 	}
 }
+
+static void tasklet_copy(void* data)
+{
+	int read, written;
+	char buf[FIFOSIZE];	// Works only for small fifos
+	
+	// Copy from fifo 0 into buffer
+	read = fifo_read(2, buf, FIFOSIZE, O_NONBLOCK, copy); 
+	
+	written = 0;
+	while(written < read)
+	{
+			// Copy from buffer into fifo 3
+			written += fifo_write(3, buf + written, read - written, 0, copy);
+	}
+}
+	
+
 
 static void timer_copy(unsigned long data)
 {
@@ -426,6 +454,12 @@ static int __init fifo_init(void)
 	// Initialize timer
 	init_timer(&copytimer);
 
+
+
+	// Initialize tasklet
+	DECLARE_TASKLET(fifo_tasklet,tasklet_copy,0);
+	
+	
 	printk("FIFO module loaded.\n");
 	return 0;
 }
